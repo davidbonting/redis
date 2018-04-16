@@ -597,6 +597,11 @@ struct commandHelp {
     "Return the approximated cardinality of the set(s) observed by the HyperLogLog at key(s).",
     11,
     "2.8.9" },
+    { "PFEXIST",
+        "key element",
+        "Return boolean for element exist!.",
+        11,
+        "4.0.9" },//fzq
     { "PFMERGE",
     "destkey sourcekey [sourcekey ...]",
     "Merge N different HyperLogLogs into a single one.",

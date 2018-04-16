@@ -1994,6 +1994,7 @@ void geoposCommand(client *c);
 void geodistCommand(client *c);
 void pfselftestCommand(client *c);
 void pfaddCommand(client *c);
+void pfexistCommand(client *c);
 void pfcountCommand(client *c);
 void pfmergeCommand(client *c);
 void pfdebugCommand(client *c);
