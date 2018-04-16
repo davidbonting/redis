@@ -1072,24 +1072,20 @@ int hllDenseExist(uint8_t *registers, unsigned char *ele, size_t elesize) {
 //fzq
 int hllSparseCheckExist(robj *o, long index, uint8_t count) {
     struct hllhdr *hdr;
-    uint8_t oldcount, *sparse, *end, *p, *prev, *next;
+    uint8_t oldcount, /* *sparse, */ *end, *p, *prev, *next;
     long first, span;
-    long is_zero = 0, is_xzero = 0, is_val = 0, runlen = 0;
+//    long is_zero = 0, is_xzero = 0;
+    long is_val = 0, runlen = 0;
 
     /* If the count is too big to be representable by the sparse representation
      * switch to dense representation. */
-    if (count > HLL_SPARSE_VAL_MAX_VALUE) goto promote;
-
-    /* When updating a sparse representation, sometimes we may need to
-     * enlarge the buffer for up to 3 bytes in the worst case (XZERO split
-     * into XZERO-VAL-XZERO). Make sure there is enough space right now
-     * so that the pointers we take during the execution of the function
-     * will be valid all the time. */
-    o->ptr = sdsMakeRoomFor(o->ptr,3);//
+    if (count > HLL_SPARSE_VAL_MAX_VALUE){
+        return hllDenseCheckExist(hdr->registers,index,count);
+    }
 
     /* Step 1: we need to locate the opcode we need to modify to check
      * if a value update is actually needed. */
-    sparse = p = ((uint8_t*)o->ptr) + HLL_HDR_SIZE;
+    /* sparse = */p = ((uint8_t*)o->ptr) + HLL_HDR_SIZE;
     end = p + sdslen(o->ptr) - HLL_HDR_SIZE;
 
     first = 0;
@@ -1121,17 +1117,17 @@ int hllSparseCheckExist(robj *o, long index, uint8_t count) {
     }
     if (span == 0) return -1; /* Invalid format. */
 
-    next = HLL_SPARSE_IS_XZERO(p) ? p+2 : p+1;
-    if (next >= end) next = NULL;
+//    next = HLL_SPARSE_IS_XZERO(p) ? p+2 : p+1;
+//    if (next >= end) next = NULL;
 
     /* Cache current opcode type to avoid using the macro again and
      * again for something that will not change.
      * Also cache the run-length of the opcode. */
     if (HLL_SPARSE_IS_ZERO(p)) {
-        is_zero = 1;
+//        is_zero = 1;
         runlen = HLL_SPARSE_ZERO_LEN(p);
     } else if (HLL_SPARSE_IS_XZERO(p)) {
-        is_xzero = 1;
+//        is_xzero = 1;
         runlen = HLL_SPARSE_XZERO_LEN(p);
     } else {
         is_val = 1;
@@ -1160,158 +1156,22 @@ int hllSparseCheckExist(robj *o, long index, uint8_t count) {
      *    register) and the value is less than 'count', we just update it
      *    since this is a trivial case. */
     if (is_val) {
+
         oldcount = HLL_SPARSE_VAL_VALUE(p);
+
         /* Case A. */
-        if (oldcount >= count) return 1;
+        if (oldcount >= count){
+            return 1;
+        }
 
         /* Case B. */
         if (runlen == 1) {
-//            HLL_SPARSE_VAL_SET(p,count,1);
-            goto updated;
+            return 0;
         }
     }
 
-    /* C) Another trivial to handle case is a ZERO opcode with a len of 1.
-     * We can just replace it with a VAL opcode with our value and len of 1. */
-    if (is_zero && runlen == 1) {
-//        HLL_SPARSE_VAL_SET(p,count,1);
-        goto updated;
-    }
-
-    /* D) General case.
-     *
-     * The other cases are more complex: our register requires to be updated
-     * and is either currently represented by a VAL opcode with len > 1,
-     * by a ZERO opcode with len > 1, or by an XZERO opcode.
-     *
-     * In those cases the original opcode must be split into muliple
-     * opcodes. The worst case is an XZERO split in the middle resuling into
-     * XZERO - VAL - XZERO, so the resulting sequence max length is
-     * 5 bytes.
-     *
-     * We perform the split writing the new sequence into the 'new' buffer
-     * with 'newlen' as length. Later the new sequence is inserted in place
-     * of the old one, possibly moving what is on the right a few bytes
-     * if the new sequence is longer than the older one. */
-//    uint8_t seq[5], *n = seq;
-//    int last = first+span-1; /* Last register covered by the sequence. */
-//    int len;
-
-//    if (is_zero || is_xzero) {
-//        /* Handle splitting of ZERO / XZERO. */
-//        if (index != first) {
-//            len = index-first;
-//            if (len > HLL_SPARSE_ZERO_MAX_LEN) {
-//                HLL_SPARSE_XZERO_SET(n,len);
-//                n += 2;
-//            } else {
-//                HLL_SPARSE_ZERO_SET(n,len);
-//                n++;
-//            }
-//        }
-//        HLL_SPARSE_VAL_SET(n,count,1);
-//        n++;
-//        if (index != last) {
-//            len = last-index;
-//            if (len > HLL_SPARSE_ZERO_MAX_LEN) {
-//                HLL_SPARSE_XZERO_SET(n,len);
-//                n += 2;
-//            } else {
-//                HLL_SPARSE_ZERO_SET(n,len);
-//                n++;
-//            }
-//        }
-//    } else {
-//        /* Handle splitting of VAL. */
-//        int curval = HLL_SPARSE_VAL_VALUE(p);
-//
-//        if (index != first) {
-//            len = index-first;
-//            HLL_SPARSE_VAL_SET(n,curval,len);
-//            n++;
-//        }
-//        HLL_SPARSE_VAL_SET(n,count,1);
-//        n++;
-//        if (index != last) {
-//            len = last-index;
-//            HLL_SPARSE_VAL_SET(n,curval,len);
-//            n++;
-//        }
-//    }
-
-    /* Step 3: substitute the new sequence with the old one.
-     *
-     * Note that we already allocated space on the sds string
-     * calling sdsMakeRoomFor(). */
-//     int seqlen = n-seq;
-//     int oldlen = is_xzero ? 2 : 1;
-//     int deltalen = seqlen-oldlen;
-//
-//     if (deltalen > 0 &&
-//         sdslen(o->ptr)+deltalen > server.hll_sparse_max_bytes) goto promote;
-//     if (deltalen && next) memmove(next+deltalen,next,end-next);
-//     sdsIncrLen(o->ptr,deltalen);
-//     memcpy(p,seq,seqlen);
-//     end += deltalen;
-
-updated:
-    /* Step 4: Merge adjacent values if possible.
-     *
-     * The representation was updated, however the resulting representation
-     * may not be optimal: adjacent VAL opcodes can sometimes be merged into
-     * a single one. */
-//    p = prev ? prev : sparse;
-//    int scanlen = 5; /* Scan up to 5 upcodes starting from prev. */
-//    while (p < end && scanlen--) {
-//        if (HLL_SPARSE_IS_XZERO(p)) {
-//            p += 2;
-//            continue;
-//        } else if (HLL_SPARSE_IS_ZERO(p)) {
-//            p++;
-//            continue;
-//        }
-//        /* We need two adjacent VAL opcodes to try a merge, having
-//         * the same value, and a len that fits the VAL opcode max len. */
-//        if (p+1 < end && HLL_SPARSE_IS_VAL(p+1)) {
-//            int v1 = HLL_SPARSE_VAL_VALUE(p);
-//            int v2 = HLL_SPARSE_VAL_VALUE(p+1);
-//            if (v1 == v2) {
-//                int len = HLL_SPARSE_VAL_LEN(p)+HLL_SPARSE_VAL_LEN(p+1);
-//                if (len <= HLL_SPARSE_VAL_MAX_LEN) {
-//                    HLL_SPARSE_VAL_SET(p+1,v1,len);
-//                    memmove(p,p+1,end-p);
-//                    sdsIncrLen(o->ptr,-1);
-//                    end--;
-//                    /* After a merge we reiterate without incrementing 'p'
-//                     * in order to try to merge the just merged value with
-//                     * a value on its right. */
-//                    continue;
-//                }
-//            }
-//        }
-//        p++;
-//    }
-//
-//    /* Invalidate the cached cardinality. */
-//    hdr = o->ptr;
-//    HLL_INVALIDATE_CACHE(hdr);
     return 0;
 
-promote: /* Promote to dense representation. */
-//    if (hllSparseToDense(o) == C_ERR) return -1; /* Corrupted HLL. */
-//    hdr = o->ptr;
-
-    /* We need to call hllDenseAdd() to perform the operation after the
-     * conversion. However the result must be 1, since if we need to
-     * convert from sparse to dense a register requires to be updated.
-     *
-     * Note that this in turn means that PFADD will make sure the command
-     * is propagated to slaves / AOF, so if there is a sparse -> dense
-     * convertion, it will be performed in all the slaves as well. */
-//    int dense_retval = hllDenseCheckExist(hdr->registers,index,count);
-//    serverAssert(dense_retval == 1);
-//    return dense_retval;
-    return hllDenseCheckExist(hdr->registers,index,count);
 }
 
 
@@ -1516,6 +1376,7 @@ void pfexistCommand(client *c) {
     for (j = 2; j < c->argc; j++) {
         int retval = hllExist(o, (unsigned char*)c->argv[j]->ptr,
                                sdslen(c->argv[j]->ptr));
+
         switch(retval) {
         case 1:
             updated++;
@@ -1534,7 +1395,6 @@ void pfexistCommand(client *c) {
 //    }
     addReply(c, updated ? shared.cone : shared.czero);
 
-//    addReplyLongLong(c,hllCount(hdr,NULL));//new
 }
 
 
